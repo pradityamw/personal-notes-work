@@ -47,14 +47,15 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
-  const [prompts, setPrompts] = useState<AIPrompt[]>(INITIAL_PROMPTS);
-  const [screenshots, setScreenshots] = useState<ScreenshotKB[]>(INITIAL_SCREENSHOTS);
-  const [learningNotes, setLearningNotes] = useState<LearningJournal[]>(INITIAL_LEARNING_NOTES);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [prompts, setPrompts] = useState<AIPrompt[]>([]);
+  const [screenshots, setScreenshots] = useState<ScreenshotKB[]>([]);
+  const [learningNotes, setLearningNotes] = useState<LearningJournal[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [darkMode, setDarkMode] = useState<boolean>(true);
+  const [isDataLoaded, setIsDataLoaded] = useState<boolean>(false);
 
   // Load from Supabase when authenticated
   useEffect(() => {
@@ -65,11 +66,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (session?.user) {
             const userId = session.user.id;
             const [
-              { data: pData, error: pErr },
-              { data: tData, error: tErr },
-              { data: prData, error: prErr },
-              { data: scData, error: scErr },
-              { data: nData, error: nErr },
+              { data: pData },
+              { data: tData },
+              { data: prData },
+              { data: scData },
+              { data: nData },
             ] = await Promise.all([
               supabase.from('projects').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
               supabase.from('tasks').select('*').eq('user_id', userId).order('order_index', { ascending: true }),
@@ -78,12 +79,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               supabase.from('learning_notes').select('*').eq('user_id', userId).order('date', { ascending: false }),
             ]);
 
-            // If user has data in Supabase, populate state with real database records
-            if (pData) setProjects(pData);
-            if (tData) setTasks(tData);
-            if (prData) setPrompts(prData);
-            if (scData) setScreenshots(scData);
-            if (nData) setLearningNotes(nData);
+            // Set actual user data (even if empty, don't revert to mock)
+            setProjects(pData ?? []);
+            setTasks(tData ?? []);
+            setPrompts(prData ?? []);
+            setScreenshots(scData ?? []);
+            setLearningNotes(nData ?? []);
+            setIsDataLoaded(true);
             return;
           }
         } catch (e) {
@@ -101,16 +103,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const savedDark = localStorage.getItem('pmtm_dark');
 
         if (!isSupabaseConfigured()) {
-          if (savedProjects) setProjects(JSON.parse(savedProjects));
-          if (savedTasks) setTasks(JSON.parse(savedTasks));
-          if (savedPrompts) setPrompts(JSON.parse(savedPrompts));
-          if (savedScreenshots) setScreenshots(JSON.parse(savedScreenshots));
-          if (savedNotes) setLearningNotes(JSON.parse(savedNotes));
+          setProjects(savedProjects ? JSON.parse(savedProjects) : INITIAL_PROJECTS);
+          setTasks(savedTasks ? JSON.parse(savedTasks) : INITIAL_TASKS);
+          setPrompts(savedPrompts ? JSON.parse(savedPrompts) : INITIAL_PROMPTS);
+          setScreenshots(savedScreenshots ? JSON.parse(savedScreenshots) : INITIAL_SCREENSHOTS);
+          setLearningNotes(savedNotes ? JSON.parse(savedNotes) : INITIAL_LEARNING_NOTES);
         }
         if (savedDark !== null) setDarkMode(savedDark === 'true');
       } catch {
         // Fallback gracefully
       }
+      setIsDataLoaded(true);
     }
 
     loadData();
@@ -126,8 +129,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Save changes to localStorage
+  // Save changes to localStorage only after data is properly loaded
   useEffect(() => {
+    if (!isDataLoaded) return;
     try {
       localStorage.setItem('pmtm_projects', JSON.stringify(projects));
       localStorage.setItem('pmtm_tasks', JSON.stringify(tasks));
@@ -138,7 +142,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
-  }, [projects, tasks, prompts, screenshots, learningNotes, darkMode]);
+  }, [projects, tasks, prompts, screenshots, learningNotes, darkMode, isDataLoaded]);
 
   // Handle dark mode html class
   useEffect(() => {
