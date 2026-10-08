@@ -56,36 +56,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [darkMode, setDarkMode] = useState<boolean>(true);
 
-  // Load from Supabase (if configured) or fallback to local storage
+  // Load from Supabase when authenticated
   useEffect(() => {
     async function loadData() {
       if (isSupabaseConfigured()) {
         try {
-          const [
-            { data: pData },
-            { data: tData },
-            { data: prData },
-            { data: scData },
-            { data: nData },
-          ] = await Promise.all([
-            supabase.from('projects').select('*').order('created_at', { ascending: false }),
-            supabase.from('tasks').select('*').order('order_index', { ascending: true }),
-            supabase.from('prompts').select('*').order('created_at', { ascending: false }),
-            supabase.from('screenshots').select('*').order('created_at', { ascending: false }),
-            supabase.from('learning_notes').select('*').order('date', { ascending: false }),
-          ]);
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const userId = session.user.id;
+            const [
+              { data: pData, error: pErr },
+              { data: tData, error: tErr },
+              { data: prData, error: prErr },
+              { data: scData, error: scErr },
+              { data: nData, error: nErr },
+            ] = await Promise.all([
+              supabase.from('projects').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+              supabase.from('tasks').select('*').eq('user_id', userId).order('order_index', { ascending: true }),
+              supabase.from('prompts').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+              supabase.from('screenshots').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+              supabase.from('learning_notes').select('*').eq('user_id', userId).order('date', { ascending: false }),
+            ]);
 
-          if (pData && pData.length > 0) setProjects(pData);
-          if (tData && tData.length > 0) setTasks(tData);
-          if (prData && prData.length > 0) setPrompts(prData);
-          if (scData && scData.length > 0) setScreenshots(scData);
-          if (nData && nData.length > 0) setLearningNotes(nData);
+            // If user has data in Supabase, populate state with real database records
+            if (pData) setProjects(pData);
+            if (tData) setTasks(tData);
+            if (prData) setPrompts(prData);
+            if (scData) setScreenshots(scData);
+            if (nData) setLearningNotes(nData);
+            return;
+          }
         } catch (e) {
           console.warn('Error loading from Supabase, fallback to storage:', e);
         }
       }
 
-      // Check localStorage for any cached or offline values
+      // Check localStorage for offline values
       try {
         const savedProjects = localStorage.getItem('pmtm_projects');
         const savedTasks = localStorage.getItem('pmtm_tasks');
@@ -108,6 +114,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     loadData();
+
+    // Listen to auth changes so if user logs out and logs in again, data re-syncs immediately
+    if (isSupabaseConfigured()) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          loadData();
+        }
+      });
+      return () => subscription.unsubscribe();
+    }
   }, []);
 
   // Save changes to localStorage
