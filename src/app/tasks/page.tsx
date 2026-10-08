@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -15,10 +15,23 @@ import {
 } from '@dnd-kit/core';
 import { arrayMove, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { useApp } from '@/context/AppContext';
-import { Task, TaskStatus, TaskPriority, ChecklistItem } from '@/types';
+import { Task, TaskStatus, TaskPriority, ChecklistItem, AttachmentItem } from '@/types';
 import KanbanColumn from '@/components/KanbanColumn';
 import TaskCard from '@/components/TaskCard';
-import { Plus, X, Sparkles, Filter, CheckSquare, Paperclip, ImageIcon } from 'lucide-react';
+import {
+  Plus,
+  X,
+  Sparkles,
+  Filter,
+  CheckSquare,
+  Paperclip,
+  ImageIcon,
+  Upload,
+  FileCheck,
+  CheckCircle2,
+  Trash2,
+} from 'lucide-react';
+import { uploadProjectFile } from '@/lib/fileUpload';
 
 const COLUMNS: { id: TaskStatus; title: string; colorBorder: string }[] = [
   { id: 'backlog', title: '1. Backlog', colorBorder: 'bg-zinc-400' },
@@ -57,15 +70,20 @@ export default function TasksPage() {
   const [reminder, setReminder] = useState('');
   const [aiPrompt, setAiPrompt] = useState('');
   const [notes, setNotes] = useState('');
+  const [resultNotes, setResultNotes] = useState('');
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
   const [newChecklistText, setNewChecklistText] = useState('');
   const [screenshotUrl, setScreenshotUrl] = useState('');
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sensors for dnd-kit
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 4, // 4px drag threshold to allow smooth clicks
+        distance: 4,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -73,13 +91,11 @@ export default function TasksPage() {
     })
   );
 
-  // Map of project id to name/color
   const projectsMap = projects.reduce<Record<string, { name: string; color: string }>>((acc, p) => {
     acc[p.id] = { name: p.name, color: p.color };
     return acc;
   }, {});
 
-  // Filter tasks based on selected project
   const filteredTasks = selectedProjectId
     ? tasks.filter((t) => t.project_id === selectedProjectId)
     : tasks;
@@ -97,9 +113,11 @@ export default function TasksPage() {
     setReminder('');
     setAiPrompt('');
     setNotes('');
+    setResultNotes('');
     setChecklistItems([]);
     setNewChecklistText('');
     setScreenshotUrl('');
+    setAttachments([]);
     setIsModalOpen(true);
   };
 
@@ -116,9 +134,11 @@ export default function TasksPage() {
     setReminder(task.reminder ? task.reminder.split('T')[0] : '');
     setAiPrompt(task.ai_prompt || '');
     setNotes(task.notes || '');
+    setResultNotes(task.result_notes || '');
     setChecklistItems(task.checklist || []);
     setNewChecklistText('');
     setScreenshotUrl(task.screenshots?.[0]?.url || '');
+    setAttachments(task.attachments || []);
     setIsModalOpen(true);
   };
 
@@ -138,6 +158,37 @@ export default function TasksPage() {
     setChecklistItems(checklistItems.filter((c) => c.id !== id));
   };
 
+  // Upload file handler
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    try {
+      const uploadedList: AttachmentItem[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const res = await uploadProjectFile(file);
+        uploadedList.push({
+          name: res.name,
+          url: res.url,
+          type: res.type,
+          size: res.size,
+        });
+      }
+      setAttachments((prev) => [...prev, ...uploadedList]);
+    } catch (err) {
+      console.error('Upload failed:', err);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveAttachment = (index: number) => {
+    setAttachments(attachments.filter((_, i) => i !== index));
+  };
+
   // Submit Modal
   const handleSaveTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,6 +197,9 @@ export default function TasksPage() {
     const screenshots = screenshotUrl
       ? [{ name: 'Attached Image', url: screenshotUrl }]
       : [];
+
+    const isNowDone = status === 'done';
+    const nowIso = new Date().toISOString();
 
     if (editingTask) {
       await updateTask(editingTask.id, {
@@ -159,8 +213,12 @@ export default function TasksPage() {
         reminder: reminder ? new Date(reminder).toISOString() : null,
         ai_prompt: aiPrompt,
         notes,
+        result_notes: resultNotes,
         checklist: checklistItems,
         screenshots,
+        attachments,
+        completed: isNowDone ? true : editingTask.completed,
+        completed_at: isNowDone ? (editingTask.completed_at || nowIso) : null,
       });
     } else {
       await addTask({
@@ -173,11 +231,13 @@ export default function TasksPage() {
         due_date: dueDate ? new Date(dueDate).toISOString() : null,
         reminder: reminder ? new Date(reminder).toISOString() : null,
         color_label: projectsMap[projectId]?.color || '#6366f1',
-        completed: status === 'done',
+        completed: isNowDone,
+        completed_at: isNowDone ? nowIso : null,
         checklist: checklistItems,
         ai_prompt: aiPrompt,
         notes,
-        attachments: [],
+        result_notes: resultNotes,
+        attachments,
         screenshots,
       });
     }
@@ -201,7 +261,6 @@ export default function TasksPage() {
 
     if (activeId === overId) return;
 
-    // Check if dragging over a column container
     const isOverColumn = COLUMNS.some((col) => col.id === overId);
     if (isOverColumn) {
       const activeTaskItem = tasks.find((t) => t.id === activeId);
@@ -223,14 +282,12 @@ export default function TasksPage() {
     const activeTaskItem = tasks.find((t) => t.id === activeId);
     if (!activeTaskItem) return;
 
-    // Dropped on a column
     const isColumn = COLUMNS.some((col) => col.id === overId);
     if (isColumn && activeTaskItem.status !== overId) {
       moveTaskStatus(activeId, overId as TaskStatus);
       return;
     }
 
-    // Dropped on another task
     const overTaskItem = tasks.find((t) => t.id === overId);
     if (overTaskItem && activeTaskItem.status !== overTaskItem.status) {
       moveTaskStatus(activeId, overTaskItem.status);
@@ -244,15 +301,14 @@ export default function TasksPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
             <CheckSquare className="w-6 h-6 text-indigo-500" />
-            Todo Kanban Board
+            Todo Kanban Board & Task Results
           </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Drag-and-drop antar 5 kolom status. Otomatis menghitung progress project saat task selesai.
+            Kelola task, upload file dokumen hasil pengerjaan, dan simpan catatan output setiap task.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Project dropdown filter */}
           <select
             value={selectedProjectId || ''}
             onChange={(e) => setSelectedProjectId(e.target.value || null)}
@@ -328,7 +384,7 @@ export default function TasksPage() {
           <div className="w-full max-w-xl max-h-[90vh] bg-white dark:bg-zinc-900 rounded-2xl p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800 mb-4">
               <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
-                {editingTask ? 'Edit Task' : 'Buat Task Baru'}
+                {editingTask ? 'Edit Task & Hasil Kerja' : 'Buat Task Baru'}
               </h2>
               <button
                 onClick={() => setIsModalOpen(false)}
@@ -410,7 +466,7 @@ export default function TasksPage() {
               {/* Description */}
               <div>
                 <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                  Deskripsi
+                  Deskripsi / Rencana Kerja
                 </label>
                 <textarea
                   rows={2}
@@ -419,6 +475,81 @@ export default function TasksPage() {
                   placeholder="Detail eksekusi tugas..."
                   className="w-full px-3 py-2 text-xs rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 text-zinc-900 dark:text-zinc-100"
                 />
+              </div>
+
+              {/* SECTION: HASIL PENGERJAAN & UPLOAD FILE */}
+              <div className="p-4 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/70 dark:border-emerald-900/50 space-y-3">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                  <FileCheck className="w-4 h-4" />
+                  <span>Hasil Pengerjaan & Upload Dokumen / File</span>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Catatan Hasil Pengerjaan (Result / Deliverable)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={resultNotes}
+                    onChange={(e) => setResultNotes(e.target.value)}
+                    placeholder="Contoh: Model akurasi 89%, PR merge #12, file dataset sudah di-clean..."
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Upload File Lampiran (PDF, CSV, Excel, Gambar, Dokumen, Zip)
+                  </label>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileUpload}
+                      multiple
+                      className="hidden"
+                      id="file-upload"
+                    />
+                    <label
+                      htmlFor="file-upload"
+                      className={`cursor-pointer inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-xs ${
+                        isUploading ? 'opacity-50 pointer-events-none' : ''
+                      }`}
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{isUploading ? 'Mengunggah file...' : 'Pilih File untuk Diupload'}</span>
+                    </label>
+                    <span className="text-[10px] text-zinc-400">
+                      Tersimpan ke Supabase Storage & dapat diunduh kapan saja
+                    </span>
+                  </div>
+
+                  {/* Uploaded attachments list */}
+                  {attachments.length > 0 && (
+                    <div className="mt-2.5 space-y-1.5">
+                      {attachments.map((file, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs"
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <Paperclip className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                            <span className="truncate text-zinc-800 dark:text-zinc-200">{file.name}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAttachment(idx)}
+                            className="text-zinc-400 hover:text-rose-500 ml-2"
+                            title="Hapus lampiran"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Dates Row */}
@@ -500,16 +631,16 @@ export default function TasksPage() {
                 )}
               </div>
 
-              {/* Knowledge Base Integrations: AI Prompt & Screenshot */}
+              {/* Knowledge Base Integrations */}
               <div className="p-3 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/50 space-y-3">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400">
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>Konteks Knowledge Base (Prompt & Screenshot)</span>
+                  <span>Konteks Knowledge Base (Prompt & Screenshot URL)</span>
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                    Prompt AI yang Digunakan untuk Tugas Ini
+                    Prompt AI yang Digunakan
                   </label>
                   <input
                     type="text"
@@ -522,30 +653,16 @@ export default function TasksPage() {
 
                 <div>
                   <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                    URL Screenshot / Gambar Pendukung (Supabase Storage atau Web)
+                    URL Screenshot / Image Web
                   </label>
                   <input
                     type="url"
                     value={screenshotUrl}
                     onChange={(e) => setScreenshotUrl(e.target.value)}
-                    placeholder="https://images.unsplash.com/... atau Supabase Storage URL"
+                    placeholder="https://..."
                     className="w-full px-3 py-1.5 text-xs rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100"
                   />
                 </div>
-              </div>
-
-              {/* Catatan Tambahan */}
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                  Catatan / Pembelajaran
-                </label>
-                <textarea
-                  rows={2}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Temuan, kendala, atau takeaways khusus..."
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100"
-                />
               </div>
 
               {/* Action Buttons */}
@@ -561,7 +678,7 @@ export default function TasksPage() {
                   type="submit"
                   className="px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30"
                 >
-                  {editingTask ? 'Simpan Task' : 'Buat Task'}
+                  {editingTask ? 'Simpan Perubahan' : 'Buat Task'}
                 </button>
               </div>
             </form>

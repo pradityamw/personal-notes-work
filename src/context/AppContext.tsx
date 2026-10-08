@@ -56,25 +56,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [darkMode, setDarkMode] = useState<boolean>(true);
 
-  // Load from local storage if available on mount
+  // Load from Supabase (if configured) or fallback to local storage
   useEffect(() => {
-    try {
-      const savedProjects = localStorage.getItem('pmtm_projects');
-      const savedTasks = localStorage.getItem('pmtm_tasks');
-      const savedPrompts = localStorage.getItem('pmtm_prompts');
-      const savedScreenshots = localStorage.getItem('pmtm_screenshots');
-      const savedNotes = localStorage.getItem('pmtm_notes');
-      const savedDark = localStorage.getItem('pmtm_dark');
+    async function loadData() {
+      if (isSupabaseConfigured()) {
+        try {
+          const [
+            { data: pData },
+            { data: tData },
+            { data: prData },
+            { data: scData },
+            { data: nData },
+          ] = await Promise.all([
+            supabase.from('projects').select('*').order('created_at', { ascending: false }),
+            supabase.from('tasks').select('*').order('order_index', { ascending: true }),
+            supabase.from('prompts').select('*').order('created_at', { ascending: false }),
+            supabase.from('screenshots').select('*').order('created_at', { ascending: false }),
+            supabase.from('learning_notes').select('*').order('date', { ascending: false }),
+          ]);
 
-      if (savedProjects) setProjects(JSON.parse(savedProjects));
-      if (savedTasks) setTasks(JSON.parse(savedTasks));
-      if (savedPrompts) setPrompts(JSON.parse(savedPrompts));
-      if (savedScreenshots) setScreenshots(JSON.parse(savedScreenshots));
-      if (savedNotes) setLearningNotes(JSON.parse(savedNotes));
-      if (savedDark !== null) setDarkMode(savedDark === 'true');
-    } catch {
-      // Fallback gracefully
+          if (pData && pData.length > 0) setProjects(pData);
+          if (tData && tData.length > 0) setTasks(tData);
+          if (prData && prData.length > 0) setPrompts(prData);
+          if (scData && scData.length > 0) setScreenshots(scData);
+          if (nData && nData.length > 0) setLearningNotes(nData);
+        } catch (e) {
+          console.warn('Error loading from Supabase, fallback to storage:', e);
+        }
+      }
+
+      // Check localStorage for any cached or offline values
+      try {
+        const savedProjects = localStorage.getItem('pmtm_projects');
+        const savedTasks = localStorage.getItem('pmtm_tasks');
+        const savedPrompts = localStorage.getItem('pmtm_prompts');
+        const savedScreenshots = localStorage.getItem('pmtm_screenshots');
+        const savedNotes = localStorage.getItem('pmtm_notes');
+        const savedDark = localStorage.getItem('pmtm_dark');
+
+        if (!isSupabaseConfigured()) {
+          if (savedProjects) setProjects(JSON.parse(savedProjects));
+          if (savedTasks) setTasks(JSON.parse(savedTasks));
+          if (savedPrompts) setPrompts(JSON.parse(savedPrompts));
+          if (savedScreenshots) setScreenshots(JSON.parse(savedScreenshots));
+          if (savedNotes) setLearningNotes(JSON.parse(savedNotes));
+        }
+        if (savedDark !== null) setDarkMode(savedDark === 'true');
+      } catch {
+        // Fallback gracefully
+      }
     }
+
+    loadData();
   }, []);
 
   // Save changes to localStorage
@@ -206,13 +239,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const moveTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
     const isNowDone = newStatus === 'done';
+    const nowIso = new Date().toISOString();
     const newTasks = tasks.map((t) => {
       if (t.id === taskId) {
         return {
           ...t,
           status: newStatus,
           completed: isNowDone ? true : t.completed,
-          updated_at: new Date().toISOString(),
+          completed_at: isNowDone ? (t.completed_at || nowIso) : null,
+          updated_at: nowIso,
         };
       }
       return t;
@@ -241,7 +276,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         await supabase
           .from('tasks')
-          .update({ status: newStatus, completed: isNowDone })
+          .update({
+            status: newStatus,
+            completed: isNowDone,
+            completed_at: isNowDone ? nowIso : null,
+          })
           .eq('id', taskId);
       } catch {
         // fallback
@@ -258,10 +297,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
 
     const allChecklistDone = newChecklist.length > 0 && newChecklist.every((item) => item.completed);
+    const nowIso = new Date().toISOString();
 
     await updateTask(taskId, {
       checklist: newChecklist,
-      ...(allChecklistDone && { status: 'done', completed: true }),
+      ...(allChecklistDone && { status: 'done', completed: true, completed_at: nowIso }),
     });
 
     if (allChecklistDone) {
@@ -279,6 +319,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const newCompleted = !task.completed;
     const newStatus: TaskStatus = newCompleted ? 'done' : 'in_progress';
+    const nowIso = new Date().toISOString();
 
     if (newCompleted) {
       try {
@@ -291,6 +332,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await updateTask(taskId, {
       completed: newCompleted,
       status: newStatus,
+      completed_at: newCompleted ? nowIso : null,
     });
   };
 

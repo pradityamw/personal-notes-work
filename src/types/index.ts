@@ -43,6 +43,8 @@ export interface Task {
   reminder: string | null;
   color_label: string;
   completed: boolean;
+  completed_at?: string | null;
+  result_notes?: string | null;
   checklist: ChecklistItem[];
   ai_prompt?: string | null;
   notes?: string | null;

@@ -192,6 +192,16 @@ export default function TaskCard({
         </div>
       )}
 
+      {/* Result note preview if available */}
+      {task.result_notes && (
+        <div className="mb-2 pl-6">
+          <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-[10px] text-zinc-700 dark:text-zinc-300 line-clamp-2">
+            <span className="font-semibold text-emerald-600 dark:text-emerald-400">Hasil: </span>
+            {task.result_notes}
+          </div>
+        </div>
+      )}
+
       {/* Badges / Attachments row */}
       <div className="flex items-center justify-between pt-2 border-t border-zinc-100 dark:border-zinc-800/80 text-[10px] text-zinc-400">
         <div className="flex items-center gap-2">
@@ -199,6 +209,12 @@ export default function TaskCard({
             <div className="flex items-center gap-1">
               <Calendar className="w-3 h-3 text-zinc-400" />
               <span>{format(parseISO(task.due_date), 'dd MMM')}</span>
+            </div>
+          )}
+          {task.attachments && task.attachments.length > 0 && (
+            <div className="flex items-center gap-0.5 text-indigo-500 font-medium" title={`${task.attachments.length} file terlampir`}>
+              <Paperclip className="w-3 h-3" />
+              <span>{task.attachments.length} file</span>
             </div>
           )}
           {task.ai_prompt && (
