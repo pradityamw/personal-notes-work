@@ -143,9 +143,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // --- Project Actions ---
   const addProject = async (projectData: Omit<Project, 'id' | 'created_at' | 'updated_at' | 'progress'>) => {
+    let sessionUser: { id: string } | null = null;
+    if (isSupabaseConfigured()) {
+      const { data: { session } } = await supabase.auth.getSession();
+      sessionUser = session?.user ?? null;
+    }
+
     const newProject: Project = {
       ...projectData,
-      id: 'proj-' + Date.now(),
+      id: isSupabaseConfigured() ? crypto.randomUUID() : 'proj-' + Date.now(),
+      user_id: sessionUser?.id,
       progress: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -157,9 +164,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (!error && data) {
           setProjects((prev) => [data, ...prev]);
           return;
+        } else if (error) {
+          console.error('Supabase project insert error:', error.message);
         }
-      } catch {
-        // Fallback to local
+      } catch (err) {
+        console.error('Project insert exception:', err);
       }
     }
     setProjects((prev) => [newProject, ...prev]);
@@ -195,9 +204,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // --- Task Actions ---
   const addTask = async (taskData: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => {
+    let sessionUser: { id: string } | null = null;
+    if (isSupabaseConfigured()) {
+      const { data: { session } } = await supabase.auth.getSession();
+      sessionUser = session?.user ?? null;
+    }
+
     const newTask: Task = {
       ...taskData,
-      id: 'task-' + Date.now(),
+      id: isSupabaseConfigured() ? crypto.randomUUID() : 'task-' + Date.now(),
+      user_id: sessionUser?.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -211,9 +227,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (isSupabaseConfigured()) {
       try {
-        await supabase.from('tasks').insert([newTask]);
-      } catch {
-        // fallback
+        const { error } = await supabase.from('tasks').insert([newTask]);
+        if (error) console.error('Supabase task insert error:', error.message);
+      } catch (err) {
+        console.error('Task insert exception:', err);
       }
     }
   };
@@ -357,9 +374,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // --- AIPrompt Actions ---
   const addPrompt = async (promptData: Omit<AIPrompt, 'id' | 'created_at' | 'updated_at'>) => {
+    let sessionUser: { id: string } | null = null;
+    if (isSupabaseConfigured()) {
+      const { data: { session } } = await supabase.auth.getSession();
+      sessionUser = session?.user ?? null;
+    }
+
     const newPrompt: AIPrompt = {
       ...promptData,
-      id: 'prompt-' + Date.now(),
+      id: isSupabaseConfigured() ? crypto.randomUUID() : 'prompt-' + Date.now(),
+      user_id: sessionUser?.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -367,9 +391,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (isSupabaseConfigured()) {
       try {
-        await supabase.from('prompts').insert([newPrompt]);
-      } catch {
-        // fallback
+        const { error } = await supabase.from('prompts').insert([newPrompt]);
+        if (error) console.error('Supabase prompt insert error:', error.message);
+      } catch (err) {
+        console.error('Prompt insert exception:', err);
       }
     }
   };
@@ -401,9 +426,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // --- Screenshot Actions ---
   const addScreenshot = async (ssData: Omit<ScreenshotKB, 'id' | 'created_at' | 'updated_at'>) => {
+    let sessionUser: { id: string } | null = null;
+    if (isSupabaseConfigured()) {
+      const { data: { session } } = await supabase.auth.getSession();
+      sessionUser = session?.user ?? null;
+    }
+
     const newSS: ScreenshotKB = {
       ...ssData,
-      id: 'ss-' + Date.now(),
+      id: isSupabaseConfigured() ? crypto.randomUUID() : 'ss-' + Date.now(),
+      user_id: sessionUser?.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -411,9 +443,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (isSupabaseConfigured()) {
       try {
-        await supabase.from('screenshots').insert([newSS]);
-      } catch {
-        // fallback
+        const { error } = await supabase.from('screenshots').insert([newSS]);
+        if (error) console.error('Supabase screenshot insert error:', error.message);
+      } catch (err) {
+        console.error('Screenshot insert exception:', err);
       }
     }
   };
@@ -431,9 +464,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // --- Learning Notes Actions ---
   const addLearningNote = async (noteData: Omit<LearningJournal, 'id' | 'created_at' | 'updated_at'>) => {
+    let sessionUser: { id: string } | null = null;
+    if (isSupabaseConfigured()) {
+      const { data: { session } } = await supabase.auth.getSession();
+      sessionUser = session?.user ?? null;
+    }
+
     const newNote: LearningJournal = {
       ...noteData,
-      id: 'note-' + Date.now(),
+      id: isSupabaseConfigured() ? crypto.randomUUID() : 'note-' + Date.now(),
+      user_id: sessionUser?.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -441,9 +481,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (isSupabaseConfigured()) {
       try {
-        await supabase.from('learning_notes').insert([newNote]);
-      } catch {
-        // fallback
+        const { error } = await supabase.from('learning_notes').insert([newNote]);
+        if (error) console.error('Supabase note insert error:', error.message);
+      } catch (err) {
+        console.error('Note insert exception:', err);
       }
     }
   };
